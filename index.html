@@ -1,0 +1,215 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>SDG Impact-Matcher (On-Device KI)</title>
+<style>
+  :root{--ink:#151515;--muted:#666;--line:#e6e6e6;--card:#fff;--accent:#1a8146;--accent-weak:#e6f7ee}
+  html,body{margin:0;padding:0;background:#fff;color:var(--ink);font:16px/1.45 system-ui,-apple-system,Segoe UI,Roboto,Arial}
+  .wrap{max-width:980px;margin:24px auto;padding:0 12px}
+  h1{margin:0 0 12px;font-size:28px;line-height:1.2;color:#6b5a18}
+  p.lead{margin:0 0 14px;color:var(--muted)}
+  .card{background:var(--card);border:1px solid rgba(0,0,0,.08);border-radius:14px;padding:18px;margin:14px 0;box-shadow:0 2px 10px rgba(0,0,0,.04)}
+  .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+  textarea{width:100%;min-height:120px;border:1px solid var(--line);border-radius:12px;padding:12px;resize:vertical}
+  .btn{all:unset;display:inline-flex;gap:8px;align-items:center;padding:10px 14px;border-radius:10px;border:1px solid #cfd6dd;background:#fff;cursor:pointer}
+  .btn.primary{background:var(--accent);color:#fff;border-color:var(--accent)}
+  .btn.ghost{color:var(--accent);border-color:var(--accent)}
+  .switch{border-radius:999px;padding:6px 10px;border:1px solid var(--line);background:#fafafa;cursor:pointer}
+  .switch[aria-pressed="true"]{outline:2px solid color-mix(in srgb,var(--accent) 35%, transparent);border-color:var(--accent);background:#e6f7ee}
+  .grid{display:grid;gap:12px;grid-template-columns:repeat(auto-fill,minmax(240px,1fr))}
+  .tile{border:1px solid var(--line);border-radius:12px;background:#fff;overflow:hidden}
+  .tile-head{display:flex;align-items:center;gap:8px;padding:12px;border-bottom:1px solid var(--line)}
+  .tile h3{font-size:16px;margin:0;line-height:1.2}
+  .lamp{width:12px;height:12px;border-radius:50%}
+  .lamp.green{background:#1a8146}.lamp.yellow{background:#d2a100}.lamp.red{background:#a11}.lamp.gray{background:#bbb}
+  .badge{font-size:12px;border-radius:999px;padding:4px 8px;background:#eee;color:#333;margin-left:auto}
+  .badge.green{background:#e6f7ee;color:#1a8146}.badge.yellow{background:#fff5e0;color:#7a5800}
+  .badge.red{background:#ffeaea;color:#a11}.badge.gray{background:#f3f7f3;color:#888}
+  .tile-body{padding:10px 12px;display:grid;gap:8px}
+  .match{font-size:13px;color:var(--muted)} .match b{color:#444}
+  .tweak{display:flex;gap:6px}.btn.small{padding:6px 10px;border-radius:8px;font-size:14px}
+  .pill{border:1px solid var(--line);border-radius:999px;padding:4px 8px;background:#fafafa;color:#555;font-size:12px}
+  .footer{display:flex;gap:8px;flex-wrap:wrap;align-items:center;justify-content:space-between;margin-top:8px}
+  .progress{height:8px;background:#eee;border-radius:999px;overflow:hidden;margin:8px 0}
+  .progress>i{display:block;height:100%;width:0%;background:linear-gradient(90deg,#ffd15c,#1a8146)}
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="card">
+      <h1>SDG Impact-Matcher (On-Device KI)</h1>
+      <p class="lead">Läuft lokal im Browser – kein API-Key, kein Server. Gib dein Vorhaben ein und starte die Analyse.</p>
+      <textarea id="sdl-text" placeholder="Beispiel: Mehrwegsystem für Versandverpackungen mit Pfand, Rücknahme-Logistik und CO₂-Bilanz."></textarea>
+      <div class="row">
+        <button class="btn primary" id="sdl-run" type="button">Analysieren</button>
+        <button class="btn ghost" id="sdl-reset" type="button">Zurücksetzen</button>
+        <button class="switch" id="sdl-onlyrel" aria-pressed="true" type="button">Nur relevante SDGs</button>
+        <button class="switch" id="sdl-reasons" aria-pressed="true" type="button">Begründungen anzeigen</button>
+        <span class="muted" id="sdl-status">Bereit.</span>
+      </div>
+      <div class="progress" aria-hidden="true"><i id="sdl-bar"></i></div>
+    </div>
+
+    <div class="card">
+      <div class="footer">
+        <div><span id="sdl-summary" class="pill">Noch keine Analyse</span></div>
+        <div>
+          <button class="btn small" id="sdl-copy" type="button">Ergebnis kopieren</button>
+          <button class="btn small" id="sdl-showall" type="button">Alle SDGs einblenden</button>
+        </div>
+      </div>
+      <div id="sdl-grid" class="grid" aria-live="polite"></div>
+    </div>
+  </div>
+
+  <script>
+  (function(){
+    const $=(s,c=document)=>c.querySelector(s), $$=(s,c=document)=>Array.from(c.querySelectorAll(s));
+    const TEXT=$('#sdl-text'), GRID=$('#sdl-grid'), SUMMARY=$('#sdl-summary'), STATUS=$('#sdl-status'), BAR=$('#sdl-bar');
+    let showAll=false;
+
+    const SDG_LABELS=["SDG 1 Keine Armut","SDG 2 Kein Hunger","SDG 3 Gesundheit","SDG 4 Bildung","SDG 5 Gleichstellung","SDG 6 Sauberes Wasser","SDG 7 Saubere Energie","SDG 8 Menschenwürdige Arbeit","SDG 9 Industrie & Innovation","SDG 10 Weniger Ungleichheiten","SDG 11 Nachhaltige Städte","SDG 12 Konsum & Produktion","SDG 13 Klimaschutz","SDG 14 Leben unter Wasser","SDG 15 Leben an Land","SDG 16 Frieden & Institutionen","SDG 17 Partnerschaften"];
+
+    function heuristic(t){
+      t=(t||'').toLowerCase();
+      const res=SDG_LABELS.map((name,i)=>({id:i+1,name,score:0,why:[]}));
+      const add=(ids,s,w)=>ids.forEach(id=>{res[id-1].score=Math.max(-1,Math.min(1,res[id-1].score+s)); w&&res[id-1].why.push(w);});
+      if (/(recycling|mehrweg|kreislauf)/.test(t)) add([12,9],+0.8,"Kreislauf/Mehrweg");
+      if (/(co2|klima|emission|solar|photovoltaik|wind)/.test(t)) add([13,7],+0.9,"Klimaschutz/Energie");
+      if (/(desinformation|faktencheck|moderation)/.test(t)) add([16,4],+0.5,"Informationsqualität");
+      if (/(flug|suv|kohle)/.test(t)) add([13],-0.8,"Emissionstreiber");
+      if (/(e-?auto|elektroauto|bev|ev|stromer|wallbox|lade(n|r|punkt)|akku|batterie)/.test(t)) add([7,13],+0.7,"Elektromobilität");
+      return res;
+    }
+
+    function state(n){
+      if(n>=0.66) return {k:'green',txt:'positiver Beitrag'};
+      if(n<=-0.66) return {k:'red',txt:'negativer Beitrag'};
+      if(Math.abs(n)<0.2) return {k:'gray',txt:'neutral/unklar'};
+      return {k:'yellow',txt:(n>0?'leicht positiv':'leicht negativ')};
+    }
+
+    function reasonsHTML(r){
+      const show=$('#sdl-reasons').getAttribute('aria-pressed')==='true';
+      if(!show) return `<div class="match">Score: <b>${r.score.toFixed(2)}</b></div>`;
+      return `<div class="match">${r.why?.length ? 'Begründungen: <b>' + r.why.join(', ') + '</b>' : '—'}</div>`;
+    }
+
+    function render(results){
+      GRID.innerHTML='';
+      const onlyRel=$('#sdl-onlyrel').getAttribute('aria-pressed')==='true';
+      const visible = showAll ? results : results.filter(r => !onlyRel || Math.abs(r.score)>0.05 || (r.why&&r.why.length));
+      if(!visible.length){ GRID.innerHTML=`<div class="match">Keine klaren Bezüge erkannt. Präzisiere die Beschreibung.</div>`; }
+      visible.forEach(r=>{
+        const st=state(r.score);
+        const el=document.createElement('article'); el.className='tile';
+        el.innerHTML=`
+          <div class="tile-head">
+            <span class="lamp ${st.k}" aria-hidden="true"></span>
+            <h3>${r.name}</h3>
+            <span class="badge ${st.k}">${st.txt}</span>
+          </div>
+          <div class="tile-body">
+            ${reasonsHTML(r)}
+            <div class="tweak">
+              <button class="btn small" data-act="minus" type="button">–</button>
+              <button class="btn small" data-act="plus" type="button">+</button>
+              <span class="pill">Score: <b data-score>${r.score.toFixed(2)}</b></span>
+            </div>
+          </div>`;
+        GRID.appendChild(el);
+      });
+      const pos=results.filter(r=>r.score>=0.66).length;
+      const light=results.filter(r=>Math.abs(r.score)>=0.2&&Math.abs(r.score)<0.66).length;
+      const neg=results.filter(r=>r.score<=-0.66).length;
+      SUMMARY.textContent=`Ergebnis: ${pos} positiv, ${light} leicht ±, ${neg} negativ (${results.length} SDGs geprüft)`;
+
+      // iFrame-Auto-Resize an den Eltern melden
+      try{ parent.postMessage({sdg_iframe_height: document.body.scrollHeight }, '*'); }catch(_){}
+    }
+
+    // Buttons
+    $('#sdl-grid').addEventListener('click',e=>{
+      const a=e.target.closest('[data-act]'); if(!a) return;
+      const t=e.target.closest('.tile'); const sEl=t.querySelector('[data-score]');
+      let v=parseFloat(sEl.textContent); v=Math.max(-1,Math.min(1,v+(a.dataset.act==='plus'?+0.1:-0.1)));
+      sEl.textContent=v.toFixed(2);
+      const st=state(v);
+      t.querySelector('.lamp').className='lamp '+st.k; const b=t.querySelector('.badge'); b.className='badge '+st.k; b.textContent=st.txt;
+    });
+    $('#sdl-onlyrel').addEventListener('click',(e)=>{ const v=e.currentTarget.getAttribute('aria-pressed')==='true'; e.currentTarget.setAttribute('aria-pressed', String(!v)); if(GRID.children.length) $('#sdl-run').click(); });
+    $('#sdl-reasons').addEventListener('click',(e)=>{ const v=e.currentTarget.getAttribute('aria-pressed')==='true'; e.currentTarget.setAttribute('aria-pressed', String(!v)); if(GRID.children.length) $('#sdl-run').click(); });
+    $('#sdl-showall').addEventListener('click',()=>{ showAll=!showAll; $('#sdl-showall').textContent = showAll ? 'Nur relevante SDGs' : 'Alle SDGs einblenden'; if (GRID.children.length) $('#sdl-run').click(); });
+    $('#sdl-reset').addEventListener('click',()=>{ TEXT.value=''; GRID.innerHTML=''; SUMMARY.textContent='Noch keine Analyse'; STATUS.textContent='Bereit.'; BAR.style.width='0%'; });
+
+    // Transformers UMD laden
+    async function loadTX(){
+      if (window.transformers?.pipeline) return window.transformers;
+      const urls=[
+        'https://cdn.jsdelivr.net/npm/@xenova/transformers@2.14.2/dist/transformers.min.js',
+        'https://unpkg.com/@xenova/transformers@2.14.2/dist/transformers.min.js',
+        'https://cdn.jsdelivr.net/npm/@xenova/transformers@2.15.0/dist/transformers.min.js'
+      ];
+      for (const u of urls){
+        try{ await new Promise((res,rej)=>{ const s=document.createElement('script'); s.src=u; s.async=true; s.crossOrigin='anonymous';
+          s.onload=()=>window.transformers?.pipeline?res():rej(new Error('no global')); s.onerror=()=>rej(new Error('load')); document.head.appendChild(s); }); return window.transformers; }
+        catch(_){}
+      }
+      throw new Error('Transformers nicht ladbar');
+    }
+
+    let pipe=null;
+    async function loadModel(){
+      try{
+        const tx=await loadTX();
+        try{ tx.env.backends.onnx.wasm.numThreads=Math.max(1,Math.min(4,navigator.hardwareConcurrency||1)); tx.env.backends.onnx.wasm.proxy=true; }catch(_){}
+        STATUS.textContent='Lade KI-Modell …'; BAR.style.width='15%';
+        const onProgress=i=>{ if(typeof i?.progress==='number'){ BAR.style.width = Math.min(90, 15+Math.round(i.progress*70))+'%'; } if(i?.status){ STATUS.textContent='Lade: '+i.status; } };
+        try{
+          // DE-Modell zuerst
+          pipe=await tx.pipeline('zero-shot-classification','Xenova/nli-deberta-v3-small',{progress_callback:onProgress});
+        }catch{
+          // Fallback: englisches MNLI (Labels bleiben DE)
+          pipe=await tx.pipeline('zero-shot-classification','Xenova/distilbert-base-uncased-mnli',{progress_callback:onProgress});
+        }
+        STATUS.textContent='KI bereit.'; BAR.style.width='0%';
+        return pipe;
+      }catch(e){
+        STATUS.textContent='⚠️ KI nicht verfügbar, nutze Heuristik.'; BAR.style.width='0%';
+        return null;
+      }
+    }
+
+    // Analyse
+    $('#sdl-run').addEventListener('click', async ()=>{
+      const text=TEXT.value.trim(); if(!text){ TEXT.focus(); return; }
+      GRID.innerHTML=''; STATUS.textContent='Analysiere …'; BAR.style.width='10%';
+
+      let results=[];
+      try{
+        const p=await loadModel();
+        if (p){
+          const pos=await p(text, SDG_LABELS, { multi_label:true, hypothesis_template:'Dieses Vorhaben fördert {label}.' });
+          BAR.style.width='60%';
+          const neg=await p(text, SDG_LABELS, { multi_label:true, hypothesis_template:'Dieses Vorhaben schadet {label}.' });
+          const map=r=>Object.fromEntries(r.labels.map((lab,i)=>[lab, r.scores[i]]));
+          const P=map(pos), N=map(neg);
+          results=SDG_LABELS.map((name,i)=>{ const pr=P[name]||0, nr=N[name]||0; let s=Math.max(-1,Math.min(1,pr-nr)); if(Math.abs(s)<0.15)s=0;
+            const why=[]; if(pr>0.55) why.push('fördert ('+((pr*100)|0)+'%)'); if(nr>0.55) why.push('schadet ('+((nr*100)|0)+'%)'); return {id:i+1,name,score:s,why}; });
+          STATUS.textContent='Fertig.'; BAR.style.width='0%';
+        }
+      }catch(_){}
+      if(!results.length){ results=heuristic(text); if(!STATUS.textContent.includes('⚠️')) STATUS.textContent='Vereinfachte Analyse (Heuristik).'; BAR.style.width='0%'; }
+      render(results);
+      try{ parent.postMessage({sdg_iframe_height: document.body.scrollHeight }, '*'); }catch(_){}
+    });
+
+    // Initiale Höhe an Elternseite melden
+    try{ parent.postMessage({sdg_iframe_height: document.body.scrollHeight }, '*'); }catch(_){}
+    window.addEventListener('load', ()=>{ try{ parent.postMessage({sdg_iframe_height: document.body.scrollHeight }, '*'); }catch(_){} });
+  })();
+  </script>
+</body>
+</html>
